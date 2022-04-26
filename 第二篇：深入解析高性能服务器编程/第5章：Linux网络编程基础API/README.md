@@ -52,3 +52,139 @@ IP地址转换函数的主要作用为把字符串形式的IP地址转换为网�
 
 所谓命名socket，是指服务器的socket要与某个地址绑定。
 
+### 7.监听socket
+
+服务器socket命名好之后，可以开始在这个socket上监听并设置最大队列。监听队列也就是等待accept的队列。
+
+### 8.接收连接
+
+accept接收监听队列中的一个连接，无论队列里面的连接是断网了还是退出了。
+
+accept返回一个新的socket及绑定的地址。
+
+### 9.发起连接
+
+对于客户端，常常需要通过connect发起连接。
+
+### 10.关闭连接
+
+要注意关闭连接，不然可能一个端口长期被某个连接占据，close是把fd上的引用减1,（fork的时候引用数会加1），还可以使用功能更加强大的shutdown。
+
+下面附上简单的客户端以及服务器程序
+
+```C++
+#include "includes/util.h"
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main(int argc, char* argv[])
+{
+    if(argc != 3){
+        pmess(1, "参数数量不符合要求\n");
+        return 0;
+    }
+
+    const char* ip = argv[1];
+    int port = atoi(argv[2]);
+
+
+    int sockfd = socket(PF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in serv_addr;
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+    serv_addr.sin_port = htons(port);
+
+    int ret = connect(sockfd, (sockaddr*)&serv_addr, sizeof(serv_addr));
+    pmess(ret == -1, "socket connnet error\n");
+
+    sleep(20);
+    pmess(1, "客户端断开连接\n");
+}
+```
+
+```C
+#include <stdio.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <util.h>
+#include <string.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+
+static int temp;
+
+static void handle_term(int sig){
+    pmess(1, "SIGINT触发，服务器关闭\n");
+    close(temp);
+    exit(0);
+}
+
+int main(int argc, char* argv[])
+{
+    signal(SIGINT, handle_term);
+
+    if(argc != 3){
+        pmess(1, "参数数量不符合要求\n");
+        return 0;
+    }
+
+    const char* ip = argv[1];
+    int port = atoi(argv[2]);
+
+    sockaddr_in serv_addr;
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+
+    int welcome_fd = socket(PF_INET, SOCK_STREAM, 0);
+    pmess(welcome_fd == -1, "socket create error!\n");
+    temp = welcome_fd;
+
+    int ret = bind(welcome_fd, (sockaddr*)(&serv_addr), sizeof(serv_addr));
+    pmess(ret == -1, "socket bind  error\n");
+
+    ret = listen(welcome_fd, 5);
+    pmess(ret == -1, "socket listen error\n");
+
+    sockaddr_in clnt_addr;
+    bzero(&clnt_addr, sizeof(clnt_addr));
+    socklen_t clnt_addr_len = sizeof(clnt_addr);
+    while(true){
+        int conn_fd = accept(welcome_fd, (sockaddr*)&clnt_addr, &clnt_addr_len);
+        
+        if(conn_fd < 0){
+            pmess(1, "连接错误\n");
+        } else{
+            printf("client ip : %s, port : %d, fd : %d\n", (inet_ntoa(clnt_addr.sin_addr)), ntohs(clnt_addr.sin_port), conn_fd);
+        }
+
+    }
+    pmess(1, "服务器已停止\n");
+    close(welcome_fd);
+    return 0;
+}
+```
+
+下面是输出程序
+
+```C++
+#ifndef UTIL_H
+#define UTIL_H
+#include <stdio.h>
+
+void pmess(bool flag, const char* message){
+    if(flag == 1){
+        printf("%s\n", message);
+    }
+}
+
+#endif
+```
+
