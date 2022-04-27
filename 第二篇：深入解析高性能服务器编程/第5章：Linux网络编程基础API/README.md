@@ -201,3 +201,144 @@ void pmess(bool flag, const char* message){
 ### 3.通用数据读写函数
 
 Linux还提供了两个UDP和TCP都能使用的数据读写函数，不过看起来就很麻烦。
+
+下面是两个读写程序，至于util.h上面已经给出。
+
+```C++
+#include "includes/util.h"
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main(int argc, char* argv[])
+{
+    if(argc != 3){
+        pmess(1, "参数数量不符合要求\n");
+        return 0;
+    }
+
+    const char* ip = argv[1];
+    int port = atoi(argv[2]);
+
+
+    int sockfd = socket(PF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in serv_addr;
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+    serv_addr.sin_port = htons(port);
+
+    int ret = connect(sockfd, (sockaddr*)&serv_addr, sizeof(serv_addr));
+    pmess(ret == -1, "socket connnet error\n");
+
+    const char* normal_data = "123";
+    const char* urgent_data = "abc";
+
+    send(sockfd, normal_data, strlen(normal_data), 0);
+    send(sockfd, urgent_data, strlen(urgent_data), MSG_OOB);
+    send(sockfd, normal_data, strlen(normal_data), 0);
+
+    sleep(20);
+    close(sockfd);
+    pmess(1, "客户端断开连接\n");
+}
+```
+
+```C++
+#include <stdio.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <util.h>
+#include <string.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+
+#define BUF_SIZE 1024
+
+
+
+static int temp;
+
+static void handle_term(int sig){
+    pmess(1, "SIGINT触发, 服务器关闭\n");
+    close(temp);
+    exit(0);
+}
+
+int main(int argc, char* argv[])
+{
+    signal(SIGINT, handle_term);
+
+    if(argc != 3){
+        pmess(1, "参数数量不符合要求\n");
+        return 0;
+    }
+
+    const char* ip = argv[1];
+    int port = atoi(argv[2]);
+
+    sockaddr_in serv_addr;
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+
+    int welcome_fd = socket(PF_INET, SOCK_STREAM, 0);
+    pmess(welcome_fd == -1, "socket create error!\n");
+    temp = welcome_fd;
+
+    int ret = bind(welcome_fd, (sockaddr*)(&serv_addr), sizeof(serv_addr));
+    pmess(ret == -1, "socket bind  error\n");
+
+    ret = listen(welcome_fd, 5);
+    pmess(ret == -1, "socket listen error\n");
+
+    sockaddr_in clnt_addr;
+    bzero(&clnt_addr, sizeof(clnt_addr));
+    socklen_t clnt_addr_len = sizeof(clnt_addr);
+    while(true){
+
+        char buf[BUF_SIZE];
+        memset(buf, '\0', BUF_SIZE);
+
+        int conn_fd = accept(welcome_fd, (sockaddr*)&clnt_addr, &clnt_addr_len);
+        
+        if(conn_fd < 0){
+            pmess(1, "连接错误\n");
+        } else{
+            printf("client ip : %s, port : %d, fd : %d\n", (inet_ntoa(clnt_addr.sin_addr)), ntohs(clnt_addr.sin_port), conn_fd);
+        }
+
+        memset(buf, '\0', BUF_SIZE);
+        ret = recv(conn_fd, buf, BUF_SIZE-1, 0);
+        printf("字节数：%d, 内容：%s\n", ret, buf);
+        memset(buf, '\0', BUF_SIZE);
+        ret = recv(conn_fd, buf, BUF_SIZE-1, MSG_OOB);
+        printf("字节数：%d, 内容：%s\n", ret, buf);
+        memset(buf, '\0', BUF_SIZE);
+        ret = recv(conn_fd, buf, BUF_SIZE-1, 0);
+        printf("字节数：%d, 内容：%s\n", ret, buf);
+
+
+    }
+    pmess(1, "服务器已停止\n");
+    close(welcome_fd);
+    return 0;
+}
+```
+
+## 三.带外标记
+
+刚刚我们写的程序接收紧急数据是知道要发送紧急数据了，但是正常使用中我们总不能未卜先知吧，所以使用的还是一个函数来判断下一个数据是否是带外数据。这个我遇到一个很诡异的问题，就是接受紧急数据后sockatmark还是一直返回1，
+
+## 四.socket选项
+
+socket本身是可以设置很多选项的，这些选项是对通信的一些设置，例如我们接受带外数据时可以利用设置选项使得带外数据存放在普通缓存区。
+
+## 五.网络信息API
+
+也有很多通过主机名或服务名以及其他信息来获得主机信息或其他信息的网络API。
